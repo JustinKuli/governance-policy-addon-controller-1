@@ -12,3 +12,6 @@ spec:
       operator: "Equal"
       value: "something-else"
       effect: "NoSchedule"
+  customizedVariables:
+    - name: clientBurst
+      value: "100"

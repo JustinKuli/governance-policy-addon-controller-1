@@ -185,6 +185,7 @@ func GetAgentAddon(controllerContext *controllercmd.ControllerContext) (agent.Ag
 				addonfactory.NewAddOnDeloymentConfigGetter(addonClient),
 				addonfactory.ToAddOnNodePlacementValues,
 				addonfactory.ToAddOnCustomizedVariableValues,
+				VarsToValuesArgs,
 			),
 			getValues,
 			addonfactory.GetValuesFromAddonAnnotation,
@@ -197,4 +198,18 @@ func GetAgentAddon(controllerContext *controllercmd.ControllerContext) (agent.Ag
 
 func GetAndAddAgent(mgr addonmanager.AddonManager, controllerContext *controllercmd.ControllerContext) error {
 	return policyaddon.GetAndAddAgent(mgr, addonName, controllerContext, GetAgentAddon)
+}
+
+func VarsToValuesArgs(config addonapiv1alpha1.AddOnDeploymentConfig) (addonfactory.Values, error) {
+	values := addonfactory.Values{}
+
+	args := make(map[string]interface{})
+
+	for _, variable := range config.Spec.CustomizedVariables {
+		args[variable.Name] = variable.Value
+	}
+
+	values["args"] = args
+
+	return values, nil
 }

@@ -139,6 +139,23 @@ var _ = Describe("Test config-policy-controller deployment", func() {
 			}
 			Expect(tolerations[0]).To(Equal(expected))
 
+			By(logPrefix + "verifying the qps burst setting from the addondeploymentconfig")
+			containers, _, _ := unstructured.NestedSlice(deploy.Object, "spec", "template", "spec", "containers")
+			Expect(containers).NotTo(BeEmpty())
+
+			burstFound := false
+			for _, cont := range containers {
+				container := cont.(map[string]interface{})
+				if container["name"] == "config-policy-controller" {
+					burstFound = true
+
+					args, _, _ := unstructured.NestedStringSlice(container, "args")
+					Expect(args).To(ContainElement("--client-burst=100"))
+				}
+			}
+
+			Expect(burstFound).To(BeTrue())
+
 			By(logPrefix +
 				"removing the config-policy-controller deployment when the ManagedClusterAddOn CR is removed")
 			Kubectl("delete", "-n", cluster.clusterName, "-f", case2ManagedClusterAddOnCR, "--timeout=30s")
