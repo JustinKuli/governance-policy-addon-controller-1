@@ -22,6 +22,7 @@ const (
 	case1ClusterManagementAddOnCRDefault string = "../resources/framework_clustermanagementaddon.yaml"
 	case1ClusterManagementAddOnCR        string = "../resources/framework_clustermanagementaddon_config.yaml"
 	case1CMAAddonWithInstallNs           string = "../resources/framework_cma_config_agentInstallNs.yaml"
+	case1CMAAddonWithCustomizedVars      string = "../resources/framework_cma_config_customizedVars.yaml"
 	case1hubAnnotationMCAOCR             string = "../resources/framework_hub_annotation_addon_cr.yaml"
 	case1hubValuesMCAOCR                 string = "../resources/framework_hub_values_addon_cr.yaml"
 	case1DeploymentName                  string = "governance-policy-framework"
@@ -90,12 +91,13 @@ var _ = Describe("Test framework deployment", func() {
 			// Use i+1 since the for loop ranges over a slice skipping first index
 			checkContainersAndAvailability(ctx, cluster, i+1)
 
-			expectedArgs := []string{
-				"--cluster-namespace=" + cluster.clusterName, "--leader-elect=false",
-				"--evaluation-concurrency=2", "--client-max-qps=30", "--client-burst=45",
-			}
-
-			checkArgs(ctx, cluster, expectedArgs...)
+			checkArgs(ctx, cluster,
+				"--cluster-namespace="+cluster.clusterName,
+				"--leader-elect=false",
+				"--evaluation-concurrency=2",
+				"--client-max-qps=30",
+				"--client-burst=45",
+			)
 
 			By(logPrefix + "removing the framework deployment when the ManagedClusterAddOn CR is removed")
 			Kubectl("delete", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, "--timeout=180s")
@@ -192,7 +194,7 @@ var _ = Describe("Test framework deployment", func() {
 	It("should create the default framework deployment in hosted mode in klusterlet agent namespace",
 		Label("hosted-mode"), func(ctx SpecContext) {
 			By("Creating the AddOnDeploymentConfig")
-			Kubectl("apply", "-f", addOnDeploymentConfigWithCustomVarsCR)
+			Kubectl("apply", "-f", addOnDeploymentConfigWithManagedKubeconfigCR)
 			By("Applying the governance-policy-framework ClusterManagementAddOn to use the AddOnDeploymentConfig")
 			Kubectl("apply", "-f", case1ClusterManagementAddOnCR)
 
@@ -248,10 +250,12 @@ var _ = Describe("Test framework deployment", func() {
 				Expect(namespace).To(BeNil())
 			}
 			By("Deleting the AddOnDeploymentConfig")
-			Kubectl("delete", "-f", addOnDeploymentConfigWithCustomVarsCR, "--timeout=15s")
+			Kubectl("delete", "-f", addOnDeploymentConfigWithManagedKubeconfigCR, "--timeout=15s")
+			By("Restoring the governance-policy-framework ClusterManagementAddOn")
+			Kubectl("apply", "-f", case1ClusterManagementAddOnCRDefault)
 		})
 
-	It("should create a framework deployment with customizations", func(ctx SpecContext) {
+	It("should create a framework deployment with customizations from annotations", func(ctx SpecContext) {
 		for i, cluster := range managedClusterList {
 			logPrefix := cluster.clusterType + " " + cluster.clusterName + ": "
 			By(logPrefix + "deploying the default framework managedclusteraddon")
@@ -272,8 +276,56 @@ var _ = Describe("Test framework deployment", func() {
 			By(logPrefix + "annotating the managedclusteraddon with the " + clientQPSAnnotation + " annotation")
 			Kubectl("annotate", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, clientQPSAnnotation)
 
-			checkArgs(ctx, cluster, "--log-encoder=console", "--log-level=8", "--v=6",
-				"--evaluation-concurrency=5", "--client-max-qps=50")
+			checkArgs(ctx, cluster,
+				"--log-encoder=console",
+				"--log-level=8",
+				"--v=6",
+				"--evaluation-concurrency=5",
+				"--client-max-qps=50",
+				"--client-burst=111",
+			)
+
+			By(logPrefix + "removing the framework deployment when the ManagedClusterAddOn CR is removed")
+			Kubectl("delete", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, "--timeout=180s")
+			deploy := GetWithTimeout(
+				ctx, cluster.clusterClient, gvrDeployment, case1DeploymentName, addonNamespace, false, 30,
+			)
+			Expect(deploy).To(BeNil())
+
+			By("Should have " + ocmPolicyNs + " in normal mode")
+			ns := GetWithTimeout(
+				ctx, cluster.clusterClient, gvrNamespace, ocmPolicyNs, "", true, 60,
+			)
+			Expect(ns).ShouldNot(BeNil())
+		}
+	})
+
+	It("should create a framework deployment with customizations from AddOnDeploymentConfig", func(ctx SpecContext) {
+		By("Creating the AddOnDeploymentConfig")
+		Kubectl("apply", "-f", addOnDeploymentConfigWithCustomVarsCR)
+		By("Applying the governance-policy-framework ClusterManagementAddOn to use the AddOnDeploymentConfig")
+		Kubectl("apply", "-f", case1CMAAddonWithCustomizedVars)
+
+		for i, cluster := range managedClusterList {
+			logPrefix := cluster.clusterType + " " + cluster.clusterName + ": "
+			By(logPrefix + "deploying the default framework managedclusteraddon")
+			Kubectl("apply", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR)
+
+			deploy := GetWithTimeout(
+				ctx, cluster.clusterClient, gvrDeployment, case1DeploymentName, addonNamespace, true, 60,
+			)
+			Expect(deploy).NotTo(BeNil())
+
+			checkContainersAndAvailability(ctx, cluster, i)
+
+			checkArgs(ctx, cluster,
+				"--log-encoder=json",
+				"--log-level=2",
+				"--v=0",
+				"--evaluation-concurrency=1",
+				"--client-max-qps=15",
+				"--client-burst=30",
+			)
 
 			By(logPrefix + "verifying the " + ocmPolicyNs + " namespace exists in non-hosted mode")
 			ns := GetWithTimeout(
@@ -283,7 +335,7 @@ var _ = Describe("Test framework deployment", func() {
 
 			By(logPrefix + "removing the framework deployment when the ManagedClusterAddOn CR is removed")
 			Kubectl("delete", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, "--timeout=180s")
-			deploy := GetWithTimeout(
+			deploy = GetWithTimeout(
 				ctx, cluster.clusterClient, gvrDeployment, case1DeploymentName, addonNamespace, false, 30,
 			)
 			Expect(deploy).To(BeNil())
@@ -435,7 +487,11 @@ var _ = Describe("Test framework deployment", func() {
 		By(logPrefix + "annotating the managedclusteraddon with the " + loggingLevelAnnotation + " annotation")
 		Kubectl("annotate", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, loggingLevelAnnotation)
 
-		checkArgs(ctx, cluster, "--log-encoder=console", "--log-level=8", "--v=6")
+		checkArgs(ctx, cluster,
+			"--log-encoder=console",
+			"--log-level=8",
+			"--v=6",
+		)
 
 		By(logPrefix + "deleting the managedclusteraddon")
 		Kubectl("delete", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, "--timeout=180s")
@@ -585,7 +641,11 @@ var _ = Describe("Test framework deployment", func() {
 		By(logPrefix + "annotating the managedclusteraddon with the " + loggingLevelAnnotation + " annotation")
 		Kubectl("annotate", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, loggingLevelAnnotation)
 
-		checkArgs(ctx, cluster, "--log-encoder=console", "--log-level=8", "--v=6")
+		checkArgs(ctx, cluster,
+			"--log-encoder=console",
+			"--log-level=8",
+			"--v=6",
+		)
 
 		By(logPrefix + "deleting the managedclusteraddon")
 		Kubectl("delete", "-n", cluster.clusterName, "-f", case1ManagedClusterAddOnCR, "--timeout=180s")

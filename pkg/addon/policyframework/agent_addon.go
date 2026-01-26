@@ -36,8 +36,6 @@ const (
 	syncPoliciesOnMulticlusterHubAnnotation = "policy.open-cluster-management.io/sync-policies-on-multicluster-hub"
 )
 
-var log = ctrl.Log.WithName("policyframework")
-
 // FS go:embed
 //
 //go:embed manifests
@@ -53,7 +51,8 @@ var agentPermissionFiles = []string{
 }
 
 type UserArgs struct {
-	policyaddon.UserArgs
+	policyaddon.UserArgs `json:",inline"`
+
 	SyncPoliciesOnMulticlusterHub bool  `json:"syncPoliciesOnMulticlusterHub,omitempty"`
 	EvaluationConcurrency         uint8 `json:"evaluationConcurrency,omitempty"`
 	ClientQPS                     uint8 `json:"clientQPS,omitempty"` //nolint:tagliatelle
@@ -61,12 +60,13 @@ type UserArgs struct {
 }
 
 type userValues struct {
+	UserArgs `json:",inline"`
+
 	OnMulticlusterHub             bool                     `json:"onMulticlusterHub"`
 	GlobalValues                  policyaddon.GlobalValues `json:"global"`
 	KubernetesDistribution        string                   `json:"kubernetesDistribution"`
 	HostingKubernetesDistribution string                   `json:"hostingKubernetesDistribution"`
 	Prometheus                    map[string]interface{}   `json:"prometheus"`
-	UserArgs                      UserArgs                 `json:"args"`
 }
 
 func getValues(clusterClient clusterlistersv1.ManagedClusterLister) func(*clusterv1.ManagedCluster,
@@ -75,6 +75,8 @@ func getValues(clusterClient clusterlistersv1.ManagedClusterLister) func(*cluste
 	return func(
 		cluster *clusterv1.ManagedCluster, addon *addonapiv1alpha1.ManagedClusterAddOn,
 	) (addonfactory.Values, error) {
+		log := ctrl.Log.WithName("policyframework")
+
 		userValues := userValues{
 			OnMulticlusterHub: false,
 			GlobalValues: policyaddon.GlobalValues{
@@ -262,14 +264,14 @@ func GetAgentAddon(ctx context.Context, controllerContext *controllercmd.Control
 	return addonfactory.NewAgentAddonFactory(addonName, FS, "manifests/managedclusterchart").
 		WithConfigGVRs(utils.AddOnDeploymentConfigGVR).
 		WithGetValuesFuncs(
+			getValues(clusterInformer.Lister()),
+			addonfactory.GetValuesFromAddonAnnotation,
 			addonfactory.GetAddOnDeploymentConfigValues(
 				addonfactory.NewAddOnDeploymentConfigGetter(addonClient),
 				addonfactory.ToAddOnNodePlacementValues,
 				addonfactory.ToAddOnResourceRequirementsValues,
 				addonfactory.ToAddOnCustomizedVariableValues,
 			),
-			getValues(clusterInformer.Lister()),
-			addonfactory.GetValuesFromAddonAnnotation,
 			mandateValues,
 		).
 		WithManagedClusterClient(clusterClient).
