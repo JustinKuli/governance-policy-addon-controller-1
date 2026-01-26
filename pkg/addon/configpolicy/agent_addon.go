@@ -270,14 +270,14 @@ func GetAgentAddon(ctx context.Context, controllerContext *controllercmd.Control
 	return addonfactory.NewAgentAddonFactory(addonName, FS, "manifests/managedclusterchart").
 		WithConfigGVRs(utils.AddOnDeploymentConfigGVR).
 		WithGetValuesFuncs(
+			getValues(clusterInformer.Lister(), addonInformer.Lister()),
+			addonfactory.GetValuesFromAddonAnnotation,
 			addonfactory.GetAddOnDeploymentConfigValues(
 				addonfactory.NewAddOnDeploymentConfigGetter(addonClient),
 				addonfactory.ToAddOnNodePlacementValues,
 				addonfactory.ToAddOnResourceRequirementsValues,
 				addonfactory.ToAddOnCustomizedVariableValues,
 			),
-			getValues(clusterInformer.Lister(), addonInformer.Lister()),
-			addonfactory.GetValuesFromAddonAnnotation,
 			mandateValues,
 		).
 		WithManagedClusterClient(clusterClient).
